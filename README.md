@@ -120,7 +120,7 @@ AI-A2_23F-0643
 ├── heuristics.py
 ├── README.md
 └── report.pdf
-⚙️ Requirements
+Requirements
 
 Python 3.8+
 
@@ -129,7 +129,7 @@ pip install tkinter
 
 (Note: Tkinter comes pre-installed with most Python distributions.)
 
-▶️ How to Run
+▶How to Run
 
 Navigate to project folder:
 
