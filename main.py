@@ -87,6 +87,7 @@ class App:
 
         # Search visualization sets
         self.visited = set()
+        self.frontier = set()   # ✅ NEW
         self.path = []
         self.agent_pos = None
 
@@ -139,8 +140,8 @@ class App:
     # ---------- Visualization ----------
     def clear_search(self):
         self.visited = set()
+        self.frontier = set()   # ✅ NEW
         self.path = []
-        # keep agent at start if user wants reset effect
         if self.agent_pos is None:
             self.agent_pos = self.start
         self.metrics_var.set("Nodes: 0\nCost: 0\nTime: 0 ms\nReplans: 0")
@@ -162,7 +163,9 @@ class App:
                 else:
                     color = "white"
 
-                # Overlays
+                # Overlays (frontier first, then visited, then path)
+                if cell in self.frontier and cell not in (self.start, self.goal):
+                    color = "yellow"
                 if cell in self.visited and cell not in (self.start, self.goal):
                     color = "#9db7ff"  # visited
                 if cell in self.path and cell not in (self.start, self.goal):
@@ -182,11 +185,15 @@ class App:
 
                 # Labels always visible
                 if cell == self.start:
-                    self.canvas.create_text(x1 + CELL_SIZE/2, y1 + CELL_SIZE/2,
-                                            text="S", fill="white", font=("Arial", 12, "bold"))
+                    self.canvas.create_text(
+                        x1 + CELL_SIZE/2, y1 + CELL_SIZE/2,
+                        text="S", fill="white", font=("Arial", 12, "bold")
+                    )
                 if cell == self.goal:
-                    self.canvas.create_text(x1 + CELL_SIZE/2, y1 + CELL_SIZE/2,
-                                            text="G", fill="white", font=("Arial", 12, "bold"))
+                    self.canvas.create_text(
+                        x1 + CELL_SIZE/2, y1 + CELL_SIZE/2,
+                        text="G", fill="white", font=("Arial", 12, "bold")
+                    )
 
         self.root.update_idletasks()
 
@@ -208,8 +215,9 @@ class App:
 
     # ---------- Run Search with Dynamic Replanning ----------
     def run(self):
-        # reset only visited/path but keep walls
+        # reset only visited/frontier/path but keep walls
         self.visited = set()
+        self.frontier = set()   # ✅ NEW
         self.path = []
         self.agent_pos = self.start
 
@@ -220,14 +228,13 @@ class App:
         total_time_ms = 0.0
         replans = 0
 
-        # current position changes as agent moves
         current_pos = self.agent_pos
 
         while current_pos != self.goal:
             world = GridWorld(self.rows, self.cols, current_pos, self.goal, set(self.walls))
 
             t0 = time.perf_counter()
-            path, expanded_order, expanded_count = algo_fn(world, h_fn)
+            path, expanded_order, expanded_count, frontier = algo_fn(world, h_fn)
             elapsed = (time.perf_counter() - t0) * 1000.0
 
             total_expanded += expanded_count
@@ -239,6 +246,9 @@ class App:
                 )
                 self.draw()
                 return
+
+            # store frontier for drawing
+            self.frontier = set(frontier)
 
             # Animate expansions for THIS plan
             for node in expanded_order:
@@ -269,20 +279,18 @@ class App:
                         # If it blocks remaining path => replan
                         if spawned and spawned in set(remaining[1:]):
                             replans += 1
-                            break  # break movement loop to replan
+                            break
 
                 remaining = remaining[1:]
 
                 if current_pos == self.goal:
                     break
 
-            # update metrics continuously
             cost = max(0, len(path) - 1)
             self.metrics_var.set(
                 f"Nodes: {total_expanded}\nCost: {cost}\nTime: {total_time_ms:.1f} ms\nReplans: {replans}"
             )
 
-        # reached goal
         final_cost = max(0, len(self.path) - 1)
         self.metrics_var.set(
             f"Nodes: {total_expanded}\nCost: {final_cost}\nTime: {total_time_ms:.1f} ms\nReplans: {replans}\nReached Goal ✅"
