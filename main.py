@@ -28,30 +28,49 @@ class App:
         self.rows_var = tk.IntVar(value=10)
         ttk.Entry(panel, textvariable=self.rows_var, width=6).pack(anchor="w")
 
-        ttk.Label(panel, text="Cols").pack(anchor="w", pady=(6,0))
+        ttk.Label(panel, text="Cols").pack(anchor="w", pady=(6, 0))
         self.cols_var = tk.IntVar(value=14)
         ttk.Entry(panel, textvariable=self.cols_var, width=6).pack(anchor="w")
 
-        ttk.Label(panel, text="Obstacle Density (0-1)").pack(anchor="w", pady=(10,0))
-        self.density_var = tk.DoubleVar(value=0.3)
+        ttk.Label(panel, text="Obstacle Density (0-1)").pack(anchor="w", pady=(10, 0))
+        self.density_var = tk.DoubleVar(value=0.30)
         ttk.Entry(panel, textvariable=self.density_var, width=6).pack(anchor="w")
 
-        ttk.Label(panel, text="Algorithm").pack(anchor="w", pady=(12,0))
+        ttk.Label(panel, text="Algorithm").pack(anchor="w", pady=(12, 0))
         self.algo_var = tk.StringVar(value=list(ALGOS.keys())[1])
-        ttk.Combobox(panel, textvariable=self.algo_var, values=list(ALGOS.keys()), state="readonly").pack(anchor="w", fill=tk.X)
+        ttk.Combobox(
+            panel,
+            textvariable=self.algo_var,
+            values=list(ALGOS.keys()),
+            state="readonly",
+        ).pack(anchor="w", fill=tk.X)
 
-        ttk.Label(panel, text="Heuristic").pack(anchor="w", pady=(12,0))
+        ttk.Label(panel, text="Heuristic").pack(anchor="w", pady=(12, 0))
         self.h_var = tk.StringVar(value="Manhattan")
-        ttk.Combobox(panel, textvariable=self.h_var, values=list(HEURISTICS.keys()), state="readonly").pack(anchor="w", fill=tk.X)
+        ttk.Combobox(
+            panel,
+            textvariable=self.h_var,
+            values=list(HEURISTICS.keys()),
+            state="readonly",
+        ).pack(anchor="w", fill=tk.X)
 
-        ttk.Button(panel, text="Create Grid", command=self.create_grid).pack(fill=tk.X, pady=(12,4))
+        # Dynamic controls
+        ttk.Label(panel, text="Dynamic Mode").pack(anchor="w", pady=(12, 0))
+        self.dynamic_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(panel, text="Enable", variable=self.dynamic_var).pack(anchor="w")
+
+        ttk.Label(panel, text="Spawn Probability (0-1)").pack(anchor="w", pady=(6, 0))
+        self.spawn_p_var = tk.DoubleVar(value=0.07)
+        ttk.Entry(panel, textvariable=self.spawn_p_var, width=6).pack(anchor="w")
+
+        ttk.Button(panel, text="Create Grid", command=self.create_grid).pack(fill=tk.X, pady=(12, 4))
         ttk.Button(panel, text="Random Map", command=self.random_map).pack(fill=tk.X, pady=4)
         ttk.Button(panel, text="Run", command=self.run).pack(fill=tk.X, pady=4)
         ttk.Button(panel, text="Clear Search (keep walls)", command=self.clear_search).pack(fill=tk.X, pady=4)
-        ttk.Button(panel, text="Exit", command=root.destroy).pack(fill=tk.X, pady=(20,0))
+        ttk.Button(panel, text="Exit", command=root.destroy).pack(fill=tk.X, pady=(20, 0))
 
-        ttk.Label(panel, text="Metrics", font=("Arial", 11, "bold")).pack(anchor="w", pady=(18,6))
-        self.metrics_var = tk.StringVar(value="Nodes: 0\nCost: 0\nTime: 0 ms")
+        ttk.Label(panel, text="Metrics", font=("Arial", 11, "bold")).pack(anchor="w", pady=(18, 6))
+        self.metrics_var = tk.StringVar(value="Nodes: 0\nCost: 0\nTime: 0 ms\nReplans: 0")
         ttk.Label(panel, textvariable=self.metrics_var).pack(anchor="w")
 
         # ---- Canvas ----
@@ -59,18 +78,17 @@ class App:
         self.canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
 
-        # world state
-        self.world = None
-        self.grid_data = []
+        # World state
         self.rows = 0
         self.cols = 0
         self.start = None
         self.goal = None
         self.walls = set()
 
-        # search visualization sets
+        # Search visualization sets
         self.visited = set()
         self.path = []
+        self.agent_pos = None
 
         self.create_grid()
 
@@ -79,17 +97,16 @@ class App:
         self.rows = self.rows_var.get()
         self.cols = self.cols_var.get()
 
-        self.grid_data = [[0 for _ in range(self.cols)] for _ in range(self.rows)]
-
         self.start = (self.rows - 2, self.cols - 3)
-        self.goal  = (self.rows - 3, 1)
+        self.goal = (self.rows - 3, 1)
+        self.agent_pos = self.start
 
         self.walls = set()
         self.clear_search()
         self.draw()
 
     def random_map(self):
-        density = self.density_var.get()
+        density = float(self.density_var.get())
         self.walls.clear()
 
         for r in range(self.rows):
@@ -100,6 +117,7 @@ class App:
                 if random.random() < density:
                     self.walls.add(cell)
 
+        self.agent_pos = self.start
         self.clear_search()
         self.draw()
 
@@ -110,7 +128,6 @@ class App:
             cell = (r, c)
             if cell in (self.start, self.goal):
                 return
-            # toggle wall
             if cell in self.walls:
                 self.walls.remove(cell)
             else:
@@ -123,7 +140,10 @@ class App:
     def clear_search(self):
         self.visited = set()
         self.path = []
-        self.metrics_var.set("Nodes: 0\nCost: 0\nTime: 0 ms")
+        # keep agent at start if user wants reset effect
+        if self.agent_pos is None:
+            self.agent_pos = self.start
+        self.metrics_var.set("Nodes: 0\nCost: 0\nTime: 0 ms\nReplans: 0")
 
     def draw(self):
         self.canvas.delete("all")
@@ -136,21 +156,31 @@ class App:
                 y2 = y1 + CELL_SIZE
                 cell = (r, c)
 
-                color = "white"
+                # Base color
                 if cell in self.walls:
                     color = "black"
-                elif cell in self.visited:
-                    color = "#9db7ff"     # visited (blue-ish)
-                elif cell in self.path:
-                    color = "lime"        # final path
+                else:
+                    color = "white"
 
+                # Overlays
+                if cell in self.visited and cell not in (self.start, self.goal):
+                    color = "#9db7ff"  # visited
+                if cell in self.path and cell not in (self.start, self.goal):
+                    color = "lime"  # path
+
+                # Start/Goal
                 if cell == self.start:
                     color = "green"
                 if cell == self.goal:
                     color = "red"
 
+                # Agent (top overlay)
+                if cell == self.agent_pos and cell not in (self.start, self.goal):
+                    color = "orange"
+
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="gray")
 
+                # Labels always visible
                 if cell == self.start:
                     self.canvas.create_text(x1 + CELL_SIZE/2, y1 + CELL_SIZE/2,
                                             text="S", fill="white", font=("Arial", 12, "bold"))
@@ -160,37 +190,105 @@ class App:
 
         self.root.update_idletasks()
 
-    # ---------- Run Search ----------
+    # ---------- Helpers ----------
+    def spawn_dynamic_wall(self):
+        """Spawn a wall in a random empty location (not start/goal/agent). Returns spawned cell or None."""
+        candidates = [
+            (r, c)
+            for r in range(self.rows)
+            for c in range(self.cols)
+            if (r, c) not in self.walls
+            and (r, c) not in (self.start, self.goal, self.agent_pos)
+        ]
+        if not candidates:
+            return None
+        new_wall = random.choice(candidates)
+        self.walls.add(new_wall)
+        return new_wall
+
+    # ---------- Run Search with Dynamic Replanning ----------
     def run(self):
-        # build world object
-        self.world = GridWorld(self.rows, self.cols, self.start, self.goal, set(self.walls))
+        # reset only visited/path but keep walls
+        self.visited = set()
+        self.path = []
+        self.agent_pos = self.start
 
         algo_fn = ALGOS[self.algo_var.get()]
         h_fn = HEURISTICS[self.h_var.get()]
 
-        # run algorithm (static)
-        t0 = time.perf_counter()
-        path, expanded_order, expanded_count = algo_fn(self.world, h_fn)
-        ms = (time.perf_counter() - t0) * 1000.0
+        total_expanded = 0
+        total_time_ms = 0.0
+        replans = 0
 
-        # animate expansions
-        self.visited = set()
-        self.path = []
-        for node in expanded_order:
-            self.visited.add(node)
-            self.draw()
-            self.root.update()
-            self.root.after(35)  # animation speed
+        # current position changes as agent moves
+        current_pos = self.agent_pos
 
-        # show final path
-        self.path = path
+        while current_pos != self.goal:
+            world = GridWorld(self.rows, self.cols, current_pos, self.goal, set(self.walls))
+
+            t0 = time.perf_counter()
+            path, expanded_order, expanded_count = algo_fn(world, h_fn)
+            elapsed = (time.perf_counter() - t0) * 1000.0
+
+            total_expanded += expanded_count
+            total_time_ms += elapsed
+
+            if not path:
+                self.metrics_var.set(
+                    f"Nodes: {total_expanded}\nCost: 0\nTime: {total_time_ms:.1f} ms\nReplans: {replans}\nBlocked!"
+                )
+                self.draw()
+                return
+
+            # Animate expansions for THIS plan
+            for node in expanded_order:
+                self.visited.add(node)
+                self.draw()
+                self.root.update()
+                self.root.after(20)
+
+            # Move along planned path (one step at a time)
+            remaining = path[:]  # includes current_pos
+            while len(remaining) > 1:
+                nxt = remaining[1]
+                self.agent_pos = nxt
+                current_pos = nxt
+
+                # show remaining path from current position
+                self.path = remaining
+                self.draw()
+                self.root.update()
+                self.root.after(120)
+
+                # Dynamic obstacle
+                if self.dynamic_var.get():
+                    p = float(self.spawn_p_var.get())
+                    if random.random() < p:
+                        spawned = self.spawn_dynamic_wall()
+
+                        # If it blocks remaining path => replan
+                        if spawned and spawned in set(remaining[1:]):
+                            replans += 1
+                            break  # break movement loop to replan
+
+                remaining = remaining[1:]
+
+                if current_pos == self.goal:
+                    break
+
+            # update metrics continuously
+            cost = max(0, len(path) - 1)
+            self.metrics_var.set(
+                f"Nodes: {total_expanded}\nCost: {cost}\nTime: {total_time_ms:.1f} ms\nReplans: {replans}"
+            )
+
+        # reached goal
+        final_cost = max(0, len(self.path) - 1)
+        self.metrics_var.set(
+            f"Nodes: {total_expanded}\nCost: {final_cost}\nTime: {total_time_ms:.1f} ms\nReplans: {replans}\nReached Goal ✅"
+        )
         self.draw()
 
-        cost = max(0, len(path) - 1)
-        if not path:
-            self.metrics_var.set(f"Nodes: {expanded_count}\nCost: 0\nTime: {ms:.1f} ms\nNo path!")
-        else:
-            self.metrics_var.set(f"Nodes: {expanded_count}\nCost: {cost}\nTime: {ms:.1f} ms")
 
 if __name__ == "__main__":
     root = tk.Tk()
